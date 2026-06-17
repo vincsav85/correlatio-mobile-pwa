@@ -402,10 +402,33 @@ function leggiChiaveDaUrl() {
 
 function salvaChiave(chiave) {
   localStorage.setItem("correlatio_chiave", chiave);
+  // Salva anche nel "cassetto condiviso" del service worker, perché su
+  // iOS la versione installata sulla Home non vede il localStorage di
+  // Safari — questo canale invece è condiviso tra i due.
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({ tipo: "SALVA_CHIAVE", chiave });
+  } else if (navigator.serviceWorker) {
+    navigator.serviceWorker.ready.then((reg) => {
+      if (reg.active) reg.active.postMessage({ tipo: "SALVA_CHIAVE", chiave });
+    });
+  }
 }
 
 function leggiChiaveSalvata() {
   return localStorage.getItem("correlatio_chiave");
+}
+
+// Tenta di recuperare la chiave dal "cassetto condiviso" quando non è
+// presente in localStorage (caso tipico: prima apertura dall'icona Home
+// su iOS, dopo aver scansionato il QR in Safari).
+async function recuperaChiaveCondivisa() {
+  try {
+    const risposta = await fetch("/__chiave_condivisa__");
+    const testo = await risposta.text();
+    return testo && testo.trim() ? testo.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 function aziendaSalvata() {
@@ -419,12 +442,8 @@ function salvaAzienda(nome) {
 // Punto di ingresso: se l'URL porta una chiave nuova, la salviamo e
 // "puliamo" l'indirizzo (così non resta visibile/condivisibile per sbaglio).
 const chiaveDaUrl = leggiChiaveDaUrl();
-if (chiaveDaUrl) {
-  salvaChiave(chiaveDaUrl);
-  window.history.replaceState({}, "", window.location.pathname);
-}
 
-const chiave = leggiChiaveSalvata();
+let chiave = leggiChiaveSalvata();
 
 // -----------------------------------------------------------------------
 // Guida di installazione
@@ -533,8 +552,6 @@ function gestisciGuidaInstallazione() {
   mostraGuidaInstallazione(); // Caso 3.
   segnaGuidaVista();
 }
-
-gestisciGuidaInstallazione();
 
 // -----------------------------------------------------------------------
 // Chiamate al backend
@@ -873,12 +890,48 @@ async function avvia() {
   }
 }
 
-avvia();
+// -----------------------------------------------------------------------
+// Sequenza di avvio, in ordine corretto:
+// 1. Registra il service worker (serve per leggere/scrivere il canale condiviso).
+// 2. Se l'URL porta una chiave nuova, salvala (anche nel canale condiviso).
+// 3. Se ancora non c'è una chiave in locale, provo a recuperarla dal
+//    canale condiviso (caso iOS: prima apertura dall'icona Home dopo
+//    aver scansionato il QR in Safari).
+// 4. Decido se mostrare la guida di installazione.
+// 5. Avvio l'app vera (elenco aziende, dashboard...).
+// -----------------------------------------------------------------------
 
-// Registrazione del service worker, richiesta per l'installabilità.
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js").catch(() => {});
+async function avvioCompleto() {
+  if ("serviceWorker" in navigator) {
+    try {
+      await navigator.serviceWorker.register("sw.js");
+      await navigator.serviceWorker.ready;
+    } catch {
+      // Se il service worker non si registra, l'app funziona comunque,
+      // semplicemente senza il canale condiviso (solo localStorage).
+    }
+  }
+
+  if (chiaveDaUrl) {
+    chiave = chiaveDaUrl;
+    salvaChiave(chiave);
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+
+  if (!chiave) {
+    const recuperata = await recuperaChiaveCondivisa();
+    if (recuperata) {
+      chiave = recuperata;
+      localStorage.setItem("correlatio_chiave", chiave);
+    }
+  }
+
+  gestisciGuidaInstallazione();
+  await avvia();
 }
+
+avvioCompleto();
+
 </script>
 </body>
 </html>
