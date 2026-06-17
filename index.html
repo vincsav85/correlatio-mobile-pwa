@@ -237,9 +237,139 @@
   .mag-status.ok { color: var(--accent); }
   .mag-status.attenzione { color: #8A6A00; }
   .mag-status.critico { color: var(--error); }
+
+  /* ---- Guida installazione ---- */
+  .guida-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--sand);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 50px 28px 40px;
+    text-align: center;
+    padding-top: calc(50px + env(safe-area-inset-top));
+    padding-bottom: calc(40px + env(safe-area-inset-bottom));
+  }
+
+  .guida-logo {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: var(--ink);
+    margin-bottom: 30px;
+  }
+
+  .guida-titolo {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 24px;
+    color: var(--ink);
+    margin-bottom: 10px;
+    line-height: 1.3;
+  }
+
+  .guida-sotto {
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 30px;
+    line-height: 1.5;
+  }
+
+  .guida-animazione {
+    width: 100%;
+    max-width: 260px;
+    margin-bottom: 30px;
+  }
+
+  .guida-rassicura {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.6;
+    margin-top: auto;
+    padding-top: 20px;
+  }
+
+  .guida-rassicura b { color: var(--ink2); font-weight: 500; }
+
+  /* Telefono stilizzato dentro l'animazione */
+  .phone-mock {
+    width: 150px;
+    margin: 0 auto;
+    border: 2px solid var(--ink);
+    border-radius: 24px;
+    background: white;
+    padding: 10px 8px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .phone-mock-bar {
+    height: 8px;
+    background: var(--sand2);
+    border-radius: 3px;
+    margin-bottom: 6px;
+  }
+
+  .phone-mock-row {
+    height: 6px;
+    background: var(--border);
+    border-radius: 2px;
+    margin-bottom: 5px;
+    width: 80%;
+  }
+
+  .tap-dot {
+    position: absolute;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: 0;
+  }
+
+  .ios-tap { bottom: 4px; left: 50%; transform: translateX(-50%); animation: tapPulse 2.2s ease-in-out infinite; }
+  .android-tap { top: 6px; right: 6px; animation: tapPulse 2.2s ease-in-out infinite; }
+
+  @keyframes tapPulse {
+    0%   { opacity: 0; transform: scale(0.6) translateX(-50%); }
+    15%  { opacity: 0.85; transform: scale(1) translateX(-50%); }
+    35%  { opacity: 0.85; transform: scale(1) translateX(-50%); }
+    55%  { opacity: 0; transform: scale(0.6) translateX(-50%); }
+    100% { opacity: 0; }
+  }
+  .android-tap.tap-anim {
+    animation-name: tapPulseNoTranslate;
+  }
+  @keyframes tapPulseNoTranslate {
+    0%   { opacity: 0; transform: scale(0.6); }
+    15%  { opacity: 0.85; transform: scale(1); }
+    35%  { opacity: 0.85; transform: scale(1); }
+    55%  { opacity: 0; transform: scale(0.6); }
+    100% { opacity: 0; }
+  }
+
+  .share-icon, .menu-icon {
+    position: absolute;
+    font-size: 13px;
+    color: white;
+    z-index: 2;
+  }
+  .ios-tap .share-icon { bottom: 5px; left: 50%; transform: translateX(-50%); }
+  .android-tap .menu-icon { top: 7px; right: 7px; }
+
+  .guida-cta {
+    margin-top: 24px;
+    font-size: 12px;
+    color: var(--accent);
+    font-weight: 500;
+  }
 </style>
 </head>
 <body>
+
+<div id="guida-overlay"></div>
 
 <div id="app">
   <div class="header">
@@ -295,6 +425,116 @@ if (chiaveDaUrl) {
 }
 
 const chiave = leggiChiaveSalvata();
+
+// -----------------------------------------------------------------------
+// Guida di installazione
+//
+// Logica (decisa insieme prima di costruirla):
+// 1. Se il telefono dice "sto girando come app installata" -> niente guida.
+// 2. Se non installata ma la guida è già stata vista in passato su questo
+//    browser -> messaggio breve, non la guida intera.
+// 3. Altrimenti -> guida obbligatoria, senza via di fuga, con l'animazione
+//    giusta per iOS o Android rilevati automaticamente.
+// -----------------------------------------------------------------------
+
+function appGiaInstallata() {
+  // Standard PWA: true quando l'app è aperta dall'icona Home, non dal browser.
+  const standalone = window.matchMedia("(display-mode: standalone)").matches;
+  // Fallback storico per Safari/iOS più vecchi.
+  const iosStandalone = window.navigator.standalone === true;
+  return standalone || iosStandalone;
+}
+
+function guidaGiaVista() {
+  return localStorage.getItem("correlatio_guida_vista") === "true";
+}
+
+function segnaGuidaVista() {
+  localStorage.setItem("correlatio_guida_vista", "true");
+}
+
+function rilevaPiattaforma() {
+  const ua = navigator.userAgent || "";
+  const isIOS = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+  return isIOS ? "ios" : "android";
+}
+
+function svgTelefonoIOS() {
+  return `
+    <div class="phone-mock">
+      <div class="phone-mock-bar"></div>
+      <div class="phone-mock-row"></div>
+      <div class="phone-mock-row" style="width:60%"></div>
+      <div class="phone-mock-row" style="width:70%"></div>
+      <div class="tap-dot ios-tap"><span class="share-icon">⬆</span></div>
+    </div>`;
+}
+
+function svgTelefonoAndroid() {
+  return `
+    <div class="phone-mock">
+      <div class="phone-mock-bar"></div>
+      <div class="phone-mock-row"></div>
+      <div class="phone-mock-row" style="width:60%"></div>
+      <div class="phone-mock-row" style="width:70%"></div>
+      <div class="tap-dot android-tap tap-anim"><span class="menu-icon">⋮</span></div>
+    </div>`;
+}
+
+function mostraGuidaInstallazione() {
+  const piattaforma = rilevaPiattaforma();
+  const overlay = document.getElementById("guida-overlay");
+
+  const istruzione = piattaforma === "ios"
+    ? `Tocca <b>Condividi</b> ${"⬆"} in basso, poi <b>"Aggiungi alla schermata Home"</b>`
+    : `Tocca <b>⋮</b> in alto, poi <b>"Installa app"</b> o <b>"Aggiungi a schermata Home"</b>`;
+
+  const animazione = piattaforma === "ios" ? svgTelefonoIOS() : svgTelefonoAndroid();
+
+  overlay.innerHTML = `
+    <div class="guida-logo">CORRELATIO</div>
+    <div class="guida-titolo">Aggiungi Correlatio<br>alla tua schermata Home</div>
+    <div class="guida-sotto">${istruzione}</div>
+    <div class="guida-animazione">${animazione}</div>
+    <div class="guida-rassicura">
+      Fatto questo, troverai l'icona di <b>Correlatio</b> sulla tua schermata Home.<br>
+      Non dovrai più scansionare nulla.
+    </div>
+  `;
+  overlay.style.display = "flex";
+}
+
+function nascondiGuidaInstallazione() {
+  document.getElementById("guida-overlay").style.display = "none";
+}
+
+function mostraAvvisoGiaInstallata() {
+  // Caso: l'utente ha riscansionato il QR per errore, ma l'app è già
+  // installata su questo telefono — nessuna guida, solo un avviso breve.
+  const overlay = document.getElementById("guida-overlay");
+  overlay.innerHTML = `
+    <div class="guida-logo">CORRELATIO</div>
+    <div class="guida-titolo">Hai già Correlatio installata!</div>
+    <div class="guida-sotto">Cerca la sua icona sulla tua schermata Home — non serve installarla di nuovo.</div>
+    <div class="guida-cta" id="continua-comunque">Continua qui per questa volta →</div>
+  `;
+  overlay.style.display = "flex";
+  document.getElementById("continua-comunque").addEventListener("click", nascondiGuidaInstallazione);
+}
+
+function gestisciGuidaInstallazione() {
+  if (appGiaInstallata()) {
+    return; // Caso 1: niente da fare, va dritto ai dati.
+  }
+  if (guidaGiaVista()) {
+    mostraAvvisoGiaInstallata(); // Caso 2.
+    return;
+  }
+  mostraGuidaInstallazione(); // Caso 3.
+  segnaGuidaVista();
+}
+
+gestisciGuidaInstallazione();
 
 // -----------------------------------------------------------------------
 // Chiamate al backend
