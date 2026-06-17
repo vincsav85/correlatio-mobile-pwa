@@ -402,32 +402,36 @@ function leggiChiaveDaUrl() {
 
 function salvaChiave(chiave) {
   localStorage.setItem("correlatio_chiave", chiave);
-  // Salva anche nel "cassetto condiviso" del service worker, perché su
-  // iOS la versione installata sulla Home non vede il localStorage di
-  // Safari — questo canale invece è condiviso tra i due.
-  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-    navigator.serviceWorker.controller.postMessage({ tipo: "SALVA_CHIAVE", chiave });
-  } else if (navigator.serviceWorker) {
-    navigator.serviceWorker.ready.then((reg) => {
-      if (reg.active) reg.active.postMessage({ tipo: "SALVA_CHIAVE", chiave });
-    });
-  }
+  // Salva anche nella Cache API, condivisa tra Safari e la versione
+  // installata sulla Home su iOS (localStorage invece non lo è).
+  salvaChiaveCondivisa(chiave);
 }
 
 function leggiChiaveSalvata() {
   return localStorage.getItem("correlatio_chiave");
 }
 
-// Tenta di recuperare la chiave dal "cassetto condiviso" quando non è
-// presente in localStorage (caso tipico: prima apertura dall'icona Home
-// su iOS, dopo aver scansionato il QR in Safari).
 async function recuperaChiaveCondivisa() {
+  if (!("caches" in window)) return null;
   try {
-    const risposta = await fetch("/__chiave_condivisa__");
+    const cache = await caches.open("correlatio-chiave-store");
+    const risposta = await cache.match("/chiave");
+    if (!risposta) return null;
     const testo = await risposta.text();
     return testo && testo.trim() ? testo.trim() : null;
   } catch {
     return null;
+  }
+}
+
+async function salvaChiaveCondivisa(chiave) {
+  if (!("caches" in window)) return;
+  try {
+    const cache = await caches.open("correlatio-chiave-store");
+    await cache.put("/chiave", new Response(chiave));
+  } catch {
+    // Se la Cache API non è disponibile, restiamo comunque con
+    // localStorage, che funziona nel contesto corrente.
   }
 }
 
