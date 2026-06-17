@@ -189,6 +189,54 @@
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  .item-card {
+    background: white;
+    border: 1px solid var(--border);
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .item-nome { font-size: 13px; font-weight: 500; color: var(--ink); }
+  .item-data { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  .item-importo {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 17px;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  .badge {
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    padding: 2px 8px;
+    border: 1px solid;
+    display: inline-block;
+    margin-top: 4px;
+  }
+  .badge.pagata { color: var(--accent); border-color: var(--accent); background: #f0f4fa; }
+  .badge.in_attesa { color: #8A6A00; border-color: var(--gold); background: #fdf9f0; }
+  .badge.scaduta { color: var(--error); border-color: var(--error); background: #fdf0f0; }
+
+  .vuoto-msg {
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 30px 10px;
+  }
+
+  .mag-bar-bg { height: 4px; background: var(--sand2); margin-top: 8px; }
+  .mag-bar-fill { height: 4px; }
+  .mag-status { font-size: 11px; margin-top: 4px; }
+  .mag-status.ok { color: var(--accent); }
+  .mag-status.attenzione { color: #8A6A00; }
+  .mag-status.critico { color: var(--error); }
 </style>
 </head>
 <body>
@@ -309,7 +357,9 @@ function renderSelettoreAzienda() {
   select.addEventListener("change", (e) => {
     aziendaCorrente = e.target.value;
     salvaAzienda(aziendaCorrente);
-    caricaDashboard();
+    const tabAttiva = document.querySelector(".tab.active");
+    const nomeTab = tabAttiva ? tabAttiva.dataset.tab : "dashboard";
+    CARICATORI[nomeTab]();
   });
 }
 
@@ -382,6 +432,164 @@ function renderDashboard(d) {
 
   document.getElementById("tab-bar").style.display = "flex";
 }
+
+// -----------------------------------------------------------------------
+// Vista Fatture
+// -----------------------------------------------------------------------
+
+function badgeStato(stato) {
+  const etichette = { pagata: "Pagata", in_attesa: "In attesa", scaduta: "Scaduta" };
+  return `<span class="badge ${stato}">${etichette[stato] || stato}</span>`;
+}
+
+function formattaData(iso) {
+  if (!iso) return "";
+  const [a, m, g] = iso.split("-");
+  return `${g}/${m}/${a}`;
+}
+
+async function caricaFatture() {
+  mostraMessaggio('<div class="spinner"></div>Caricamento fatture...');
+  try {
+    const d = await chiamaBackend(`/mobile/fatture?azienda=${encodeURIComponent(aziendaCorrente)}`);
+    renderFatture(d);
+  } catch (errore) {
+    mostraMessaggio(`Non riusciamo a caricare le fatture.<br><br>${errore.message}`, true);
+  }
+}
+
+function renderFatture(d) {
+  const attive = d.attive || [];
+  const passive = d.passive || [];
+
+  const rigaFattura = (f, segnoMeno) => `
+    <div class="item-card">
+      <div>
+        <div class="item-nome">${f.nome}</div>
+        <div class="item-data">${formattaData(f.data_emissione)} → scad. ${formattaData(f.data_scadenza)}</div>
+        ${badgeStato(f.stato)}
+      </div>
+      <div class="item-importo">${segnoMeno ? '−' : ''}${formattaEuro(f.importo)}</div>
+    </div>`;
+
+  const blocco = (lista, segnoMeno) => lista.length
+    ? lista.map(f => rigaFattura(f, segnoMeno)).join("")
+    : `<div class="vuoto-msg">Nessuna fattura da mostrare.</div>`;
+
+  document.getElementById("content").innerHTML = `
+    <div class="sec-label">Attive — da incassare</div>
+    ${blocco(attive, false)}
+    <div class="sec-label">Passive — da pagare</div>
+    ${blocco(passive, true)}
+    <div class="sync-info">Aggiornato alle ${formattaOraSync(d.ultima_sync)}</div>
+  `;
+}
+
+// -----------------------------------------------------------------------
+// Vista Scadenze
+// -----------------------------------------------------------------------
+
+async function caricaScadenze() {
+  mostraMessaggio('<div class="spinner"></div>Caricamento scadenze...');
+  try {
+    const d = await chiamaBackend(`/mobile/scadenze?azienda=${encodeURIComponent(aziendaCorrente)}`);
+    renderScadenze(d);
+  } catch (errore) {
+    mostraMessaggio(`Non riusciamo a caricare le scadenze.<br><br>${errore.message}`, true);
+  }
+}
+
+function renderScadenze(d) {
+  const urgenti = d.urgenti || [];
+  const prossime = d.prossime || [];
+
+  const riga = (s) => `
+    <div class="item-card">
+      <div>
+        <div class="item-nome">${s.descrizione}</div>
+        <div class="item-data">${formattaData(s.data)}</div>
+      </div>
+      <div class="item-importo">${formattaEuro(s.importo)}</div>
+    </div>`;
+
+  const blocco = (lista) => lista.length
+    ? lista.map(riga).join("")
+    : `<div class="vuoto-msg">Nessuna scadenza da mostrare.</div>`;
+
+  document.getElementById("content").innerHTML = `
+    <div class="sec-label" style="color:var(--error)">Urgenti</div>
+    ${blocco(urgenti)}
+    <div class="sec-label">Prossime</div>
+    ${blocco(prossime)}
+    <div class="sync-info">Aggiornato alle ${formattaOraSync(d.ultima_sync)}</div>
+  `;
+}
+
+// -----------------------------------------------------------------------
+// Vista Magazzino
+// -----------------------------------------------------------------------
+
+async function caricaMagazzino() {
+  mostraMessaggio('<div class="spinner"></div>Caricamento magazzino...');
+  try {
+    const d = await chiamaBackend(`/mobile/magazzino?azienda=${encodeURIComponent(aziendaCorrente)}`);
+    renderMagazzino(d);
+  } catch (errore) {
+    mostraMessaggio(`Non riusciamo a caricare il magazzino.<br><br>${errore.message}`, true);
+  }
+}
+
+function renderMagazzino(d) {
+  const articoli = d.articoli || [];
+
+  if (articoli.length === 0) {
+    document.getElementById("content").innerHTML = `<div class="vuoto-msg">Nessun articolo con scorta minima impostata.</div>`;
+    return;
+  }
+
+  const etichette = { critico: "Sotto scorta minima", attenzione: "Scorta bassa", ok: "Disponibilità buona" };
+  const colori = { critico: "var(--error)", attenzione: "var(--gold)", ok: "var(--accent)" };
+
+  const righe = articoli.map(a => {
+    const pct = Math.min(100, Math.round((a.giacenza / (a.minima * 1.5 || 1)) * 100));
+    return `
+      <div class="item-card" style="flex-direction:column;align-items:stretch">
+        <div style="display:flex;justify-content:space-between;width:100%">
+          <div class="item-nome">${a.nome}</div>
+          <div class="item-importo" style="font-size:14px">${a.giacenza}</div>
+        </div>
+        <div class="mag-bar-bg"><div class="mag-bar-fill" style="width:${pct}%;background:${colori[a.stato]}"></div></div>
+        <div class="mag-status ${a.stato}">${etichette[a.stato] || a.stato}</div>
+      </div>`;
+  }).join("");
+
+  document.getElementById("content").innerHTML = `
+    ${righe}
+    <div class="sync-info">Aggiornato alle ${formattaOraSync(d.ultima_sync)}</div>
+  `;
+}
+
+// -----------------------------------------------------------------------
+// Router tra le 4 tab
+// -----------------------------------------------------------------------
+
+const CARICATORI = {
+  dashboard: caricaDashboard,
+  fatture: caricaFatture,
+  scadenze: caricaScadenze,
+  magazzino: caricaMagazzino,
+};
+
+function vaiAllaTab(nomeTab) {
+  document.querySelectorAll(".tab").forEach(t => {
+    t.classList.toggle("active", t.dataset.tab === nomeTab);
+  });
+  CARICATORI[nomeTab]();
+}
+
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.addEventListener("click", () => vaiAllaTab(tab.dataset.tab));
+});
 
 // -----------------------------------------------------------------------
 // Avvio
